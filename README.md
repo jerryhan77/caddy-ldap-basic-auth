@@ -106,7 +106,7 @@ logging {
             group_membership_dn    "cn=admins,ou=groups,dc=example,dc=com"
             use_ldaps
         }
-        respond "Welcome, {http.auth.user}!"
+        respond "Welcome, {ldap.basicauth.username}!"
     }
 }
 ```
