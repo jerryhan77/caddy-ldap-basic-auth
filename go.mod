@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/caddyserver/caddy/v2 v2.11.3
 	github.com/go-ldap/ldap/v3 v3.4.13
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 )
 
 require (
