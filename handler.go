@@ -1,24 +1,24 @@
 package ldapbasicauth
 
 import (
-    "encoding/base64"
-    "fmt"
-    "math/rand"
-    "net/http"
-    "strings"
-    "time"
+	"encoding/base64"
+	"fmt"
+	"math/rand"
 	"net"
+	"net/http"
+	"strings"
+	"time"
 
-    "github.com/caddyserver/caddy/v2"
-    "github.com/caddyserver/caddy/v2/modules/caddyhttp"
-    "github.com/go-ldap/ldap/v3"
-    "go.uber.org/zap"
+	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/go-ldap/ldap/v3"
+	"go.uber.org/zap"
 )
 
 var clientIPHeaders = []string{
-    "CF-Connecting-IP",
-    "X-Forwarded-For",
-    "X-Real-IP",
+	"CF-Connecting-IP",
+	"X-Forwarded-For",
+	"X-Real-IP",
 }
 
 func getClientIP(r *http.Request) string {
@@ -54,14 +54,14 @@ func (m *LDAPBasicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next c
 		return nil
 	}
 
-    if locked, until := m.checkRateLimit(remote_addr); locked {
+	if locked, until := m.checkRateLimit(remote_addr); locked {
 		logger.Warn("Too many failed attempts, IP is temporarily locked", zap.String("remote_addr", remote_addr), zap.Time("locked_until", until))
 
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(until.Sub(time.Now()).Seconds())))
 		w.WriteHeader(http.StatusTooManyRequests)
 
-        return nil
-    }
+		return nil
+	}
 
 	payload, perr := base64.StdEncoding.DecodeString(strings.TrimPrefix(auth, "Basic "))
 	if perr != nil {
@@ -127,7 +127,7 @@ func (m *LDAPBasicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next c
 	}
 	defer m.putConn(l)
 
-	// 2. 动态判断：如果填写了管理员账号和密码，则进行有权绑定；否则进行匿名绑定
+	// If BindUsername and BindPassword are set, use them to authenticate
 	if strings.TrimSpace(m.BindUsername) != "" && strings.TrimSpace(m.BindPassword) != "" {
 		err = l.Bind(m.BindUsername, m.BindPassword)
 		if err != nil {
@@ -139,7 +139,7 @@ func (m *LDAPBasicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next c
 		}
 	}
 
-	// 3. 根据 uid 搜索用户的完整 DN
+	// Lookup User DN
 	searchFilter := fmt.Sprintf("(&(uid=%s)%s)", ldap.EscapeFilter(username), m.Filter)
 
 	searchRequest := ldap.NewSearchRequest(
@@ -159,7 +159,7 @@ func (m *LDAPBasicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next c
 		return nil
 	}
 
-	// 确保刚好查到一个用户
+	// Make sure we have exactly one user
 	if len(sr.Entries) == 0 {
 		logger.Error("LDAP user not exist")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -172,6 +172,7 @@ func (m *LDAPBasicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next c
 		m.registerFailedAttempt(remote_addr)
 	}
 
+	// Use the user's DN to authenticate
 	userDN := sr.Entries[0].DN
 	// userDN := fmt.Sprintf("%s=%s,%s", m.UserAttr, ldap.EscapeDN(username), m.BaseDN)
 	err = l.Bind(userDN, password)
