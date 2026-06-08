@@ -127,7 +127,53 @@ func (m *LDAPBasicAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next c
 	}
 	defer m.putConn(l)
 
-	userDN := fmt.Sprintf("%s=%s,%s", m.UserAttr, ldap.EscapeDN(username), m.BaseDN)
+	// 2. 动态判断：如果填写了管理员账号和密码，则进行有权绑定；否则进行匿名绑定
+	if strings.TrimSpace(m.BindUsername) != "" && strings.TrimSpace(m.BindPassword) != "" {
+		err = l.Bind(m.BindUsername, m.BindPassword)
+		if err != nil {
+			logger.Error("LDAP BindUser auth failed")
+			w.WriteHeader(http.StatusUnauthorized)
+			m.registerFailedAttempt(remote_addr)
+
+			return nil
+		}
+	}
+
+	// 3. 根据 uid 搜索用户的完整 DN
+	searchFilter := fmt.Sprintf("(&(uid=%s)%s)", ldap.EscapeFilter(username), m.Filter)
+
+	searchRequest := ldap.NewSearchRequest(
+		m.BaseDN,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		searchFilter,
+		[]string{"dn"}, // 只需要获取 DN
+		nil,
+	)
+
+	sr, err := l.Search(searchRequest)
+	if err != nil {
+		logger.Error("LDAP search failed")
+		w.WriteHeader(http.StatusUnauthorized)
+		m.registerFailedAttempt(remote_addr)
+
+		return nil
+	}
+
+	// 确保刚好查到一个用户
+	if len(sr.Entries) == 0 {
+		logger.Error("LDAP user not exist")
+		w.WriteHeader(http.StatusUnauthorized)
+		m.registerFailedAttempt(remote_addr)
+
+		return nil
+	} else if len(sr.Entries) > 1 {
+		logger.Error("Multiple LDAP user exist")
+		w.WriteHeader(http.StatusUnauthorized)
+		m.registerFailedAttempt(remote_addr)
+	}
+
+	userDN := sr.Entries[0].DN
+	// userDN := fmt.Sprintf("%s=%s,%s", m.UserAttr, ldap.EscapeDN(username), m.BaseDN)
 	err = l.Bind(userDN, password)
 	if err != nil {
 		logger.Warn("LDAP bind failed", zap.String("user", username), zap.Error(err))
